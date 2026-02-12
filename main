@@ -1,0 +1,54 @@
+import asyncio
+import sqlite3
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# --- НАСТРОЙКИ ---
+TOKEN = "8487544175:AAGU_2T8-PeYKXEuzh7PmKz8FHEEEohbw_k"
+CHAT_ID = -100123456789  # ID вашего чата (можно узнать у @userinfobot)
+
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
+scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+
+# --- БАЗА ДАННЫХ ---
+conn = sqlite3.connect("activity.db", check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute("""CREATE TABLE IF NOT EXISTS users 
+               (id INTEGER PRIMARY KEY, name TEXT, msgs INTEGER DEFAULT 0, reacts INTEGER DEFAULT 0)""")
+conn.commit()
+
+# --- ФУНКЦИИ ПРИВЕТСТВИЯ ---
+async def send_morning():
+    await bot.send_message(CHAT_ID, "☀️ Доброе утро! Желаю всем продуктивного дня!")
+
+async def send_night():
+    await bot.send_message(CHAT_ID, "🌙 Доброй ночи! Пора отдыхать.")
+
+# --- ОБРАБОТЧИКИ ---
+@dp.message_handler(commands=['топ_акт'])
+async def show_top(message: types.Message):
+    cursor.execute("SELECT name, msgs, reacts FROM users ORDER BY msgs DESC LIMIT 10")
+    rows = cursor.fetchall()
+    text = "🏆 **ТОП АКТИВИСТОВ:**\n\n"
+    for i, row in enumerate(rows, 1):
+        text += f"{i}. {row[0]}: 💬 {row[1]} | ❤️ {row[2]}\n"
+    await message.answer(text, parse_mode="Markdown")
+
+@dp.message_handler()
+async def count_activity(message: types.Message):
+    user_id = message.from_user.id
+    user_name = message.from_user.full_name
+    
+    cursor.execute("INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)", (user_id, user_name))
+    cursor.execute("UPDATE users SET msgs = msgs + 1 WHERE id = ?", (user_id,))
+    conn.commit()
+
+# Запуск планировщика
+scheduler.add_job(send_morning, "cron", hour=8, minute=0)
+scheduler.add_job(send_night, "cron", hour=22, minute=0)
+
+if __name__ == '__main__':
+    scheduler.start()
+    executor.start_polling(dp, skip_updates=True)
